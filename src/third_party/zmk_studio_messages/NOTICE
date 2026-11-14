@@ -1,0 +1,25 @@
+zmk-studio-messages
+===================
+
+Upstream : https://github.com/zmkfirmware/zmk-studio-messages
+License  : MIT, Copyright (c) 2024 The ZMK Contributors
+           Full text in LICENSE beside this file, vendored from the same revision.
+Revision : 6cb4c283e76209d59c45fbcb218800cd19e9339d  (2024-10-03)
+Vendored : 2026-11-09
+
+The files under proto/ are an UNMODIFIED COPY of that repository's proto/zmk/
+directory. They define the message format spoken by ZMK Studio and by every
+ZMK keyboard with Studio enabled.
+
+DO NOT EDIT THESE FILES BY HAND.
+
+They are someone else's contract. Editing our copy makes it silently disagree with
+what keyboards actually speak, which means decoding a shape that no keyboard sends. To change anything here, change the pinned revision - see ../../scripts/reconcile_zmk_model/README.md.
+
+The generated Python bindings in ../../zmk_studio_client/_pb/ are derived from these files and
+carry the same copyright and licence in their headers. Unlike this directory they are
+packaged and distributed, so the attribution has to travel in the files themselves;
+src/scripts/reconcile_zmk_model/reconcile.sh re-applies it after every regeneration.
+
+Not vendored: upstream also ships *.options.in files, which are nanopb size constraints
+used when compiling the firmware. They affect neither the wire format nor Python decoding.

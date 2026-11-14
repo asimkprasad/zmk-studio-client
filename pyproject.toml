@@ -1,0 +1,77 @@
+[project]
+name = "zmk-studio-client"
+version = "0.1.0"
+description = "Unofficial Python client for the ZMK Studio RPC protocol (serial + BLE)."
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE", "src/third_party/zmk_studio_messages/LICENSE"]
+readme = "README.md"
+authors = [{ name = "Asim Krishna Prasad" }]
+keywords = ["zmk", "zmk-studio", "keyboard", "keymap", "protobuf", "ble", "serial"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: System :: Hardware",
+    "Typing :: Typed",
+]
+dependencies = [
+    # The generated bindings declare the compiler that produced them and
+    # validate it at import time, so the floor is the gencode version, not a
+    # guess. The ceiling is real too: protobuf 8 will reject version-7 gencode.
+    "protobuf>=7.35.1,<8",
+    "pyserial>=3.5",
+    "pyobjc-framework-CoreBluetooth>=10.0 ; sys_platform == 'darwin'",
+]
+
+[project.optional-dependencies]
+# Only needed by the two generators under src/scripts/: reconcile_zmk_model/,
+# which tracks upstream, and generate_keyboard_model/, which builds our own.
+# Pinned so CI's regen diff check sees the exact protoc/protobuf gencode committed.
+regen = ["grpcio-tools==1.85.1"]
+
+[dependency-groups]
+dev = ["pytest>=8.0", "mypy>=1.10"]
+
+[project.urls]
+Homepage = "https://github.com/asimkprasad/zmk-studio-client"
+Repository = "https://github.com/asimkprasad/zmk-studio-client"
+Issues = "https://github.com/asimkprasad/zmk-studio-client/issues"
+
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["zmk_studio_client*"]
+
+# The model schema is the library's published API, so it travels in the wheel: a
+# consumer generating a client in another language needs the .proto itself, not a
+# description of it.
+[tool.setuptools.package-data]
+zmk_studio_client = ["proto/*.proto"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[[tool.mypy.overrides]]
+module = [
+    "CoreBluetooth",
+    "CoreBluetooth.*",
+    "Foundation",
+    "Foundation.*",
+    "google.protobuf",
+    "google.protobuf.*",
+    "objc",
+    "objc.*",
+    "serial",
+    "serial.*",
+]
+ignore_missing_imports = true

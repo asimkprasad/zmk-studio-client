@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+        python-version: ["3.10", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Run test suite
+        run: uv run --python ${{ matrix.python-version }} pytest
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Type-check package
+        run: uv run --python 3.12 mypy src
+
+      - name: Check generated bindings are up to date
+        run: |
+          uv run --python 3.12 --extra regen ./src/scripts/generate_keyboard_model/generate.sh
+          uv run --python 3.12 --extra regen ./src/scripts/reconcile_zmk_model/reconcile.sh generate
+          git diff --exit-code
+
+      - name: Build, install, and verify wheel in isolated environment
+        run: |
+          uv build
+          uv venv --python 3.12 "$RUNNER_TEMP/wheel-venv"
+          uv pip install --python "$RUNNER_TEMP/wheel-venv/bin/python" dist/*.whl
+          (
+            cd "$RUNNER_TEMP"
+            "$RUNNER_TEMP/wheel-venv/bin/python" - <<'PY'
+          import pathlib, sys
+          from google.protobuf import descriptor_pb2, descriptor_pool
+
+          # Register a competing top-level keymap.proto before importing our wheel.
+          other = descriptor_pb2.FileDescriptorProto()
+          other.name = "keymap.proto"
+          other.package = "someone.else"
+          other.syntax = "proto3"
+          other.message_type.add().name = "TotallyDifferent"
+          descriptor_pool.Default().Add(other)
+
+          before_path = list(sys.path)
+          import zmk_studio_client
+          from zmk_studio_client import Connection, Keyboard, Rpc, Wire
+          from zmk_studio_client.writable import WritableKeyboard
+
+          assert list(sys.path) == before_path, f"sys.path mutated: {sys.path}"
+          for bare in ("core_pb2", "keymap_pb2", "meta_pb2", "behaviors_pb2", "studio_pb2"):
+              assert bare not in sys.modules, f"{bare} leaked into top-level sys.modules"
+          proto_file = pathlib.Path(zmk_studio_client.__file__).parent / "proto" / "keyboard.proto"
+          assert proto_file.is_file()
+          PY
+          )
+          uv run --python 3.12 --no-project python - <<'PY'
+          import glob, zipfile
+          wheels = glob.glob("dist/*.whl")
+          assert len(wheels) == 1, wheels
+          with zipfile.ZipFile(wheels[0]) as zf:
+              names = set(zf.namelist())
+          assert "zmk_studio_client/proto/keyboard.proto" in names
+          assert "zmk_studio_client/py.typed" in names
+          assert not any(n.startswith(("scripts/", "third_party/")) for n in names)
+          assert any(n.endswith("/licenses/LICENSE") for n in names)
+          assert any(n.endswith("/licenses/src/third_party/zmk_studio_messages/LICENSE") for n in names)
+          PY

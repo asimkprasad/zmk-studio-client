@@ -1,0 +1,211 @@
+// Copyright (c) 2026 Asim Krishna Prasad
+// SPDX-License-Identifier: MIT
+
+syntax = "proto3";
+
+// What a connected keyboard knows, as this library reports it.
+//
+// This is the library's API, not ZMK's. ZMK's own definitions are vendored under
+// third_party/ and used to talk to the device; they never reach a caller. The
+// difference is the point: upstream's messages are shaped by the RPC that carries
+// them - envelopes, oneofs, response wrappers - and a consumer that held one would
+// be coupled to a protocol it did not ask about, and would have to regenerate its
+// own bindings from someone else's repository to name a type.
+//
+// The package is NOT `zmk.*`. A protobuf package is a globally-qualified name, and
+// claiming ZMK's would be claiming ZMK published this. It did not.
+//
+// This file ships inside the wheel, so a consumer in another language can generate
+// from it directly:
+//
+//     python3 -c 'import zmk_studio_client, pathlib;
+//                 print(pathlib.Path(zmk_studio_client.__file__).parent / "proto")'
+package zmk_studio_client.v1;
+
+// --------------------------------------------------------------------------- //
+// the device
+// --------------------------------------------------------------------------- //
+
+// What the keyboard answers about itself. Answered even when locked.
+//
+// There is no firmware version here because the protocol does not report one.
+// GetDeviceInfoResponse carries a name and a serial number and nothing else.
+message DeviceInfo {
+  string name = 1;
+
+  // The hardware serial, raw. Deliberately not hashed, truncated or formatted:
+  // what to do with an identifier is the consumer's policy, and a library that
+  // pre-digested it would make the undigested form unreachable. A consumer that
+  // publishes snapshots can digest it before writing, where that decision belongs.
+  bytes serial_number = 2;
+}
+
+// Whether ZMK Studio has been unlocked on this keyboard.
+//
+// Upstream spells the locked state as its zero value. This does not, because a
+// field that was never set would then read as a definite "locked" - the same
+// shape of bug as reading an unset oneof branch and getting a valid-looking empty
+// message. UNSPECIFIED means nobody answered; LOCKED means the keyboard said so.
+enum LockState {
+  LOCK_STATE_UNSPECIFIED = 0;
+  LOCK_STATE_LOCKED = 1;
+  LOCK_STATE_UNLOCKED = 2;
+}
+
+// --------------------------------------------------------------------------- //
+// the keymap
+// --------------------------------------------------------------------------- //
+
+message Keymap {
+  // In the order the keyboard reported them, which need not match the ids: a
+  // keyboard can report FUN as id 5 ahead of SYM as id 4.
+  repeated Layer layers = 1;
+
+  // How many layers this firmware build has room for in total, and the longest
+  // name it will accept. Reported by the keyboard, kept because a consumer that
+  // adds or renames a layer needs them and has no other way to ask.
+  uint32 available_layers = 2;
+  uint32 max_layer_name_length = 3;
+}
+
+message Layer {
+  // Assigned by the firmware and stable while it runs. Not the position in
+  // `Keymap.layers`.
+  uint32 id = 1;
+
+  string name = 2;
+
+  // Indexed by key position: `bindings[3]` is what key 3 does on this layer, and
+  // positions index into the active PhysicalLayout. The position is the index and
+  // nothing else, so there is no second field that could disagree with it. A
+  // consumer storing bindings out of order has to record the position itself.
+  repeated Binding bindings = 3;
+}
+
+// What one key position does on one layer.
+message Binding {
+  // Assigned by the firmware: an index into THIS build's behavior table. It means
+  // nothing on another board, and nothing in a file read later - a stored binding
+  // has to be re-matched by `Behavior.display_name` against a live table before it
+  // can be written back.
+  int32 behavior_id = 1;
+
+  // Raw parameters as the keyboard reported them. A parameter packs a modifier
+  // mask, a HID usage page and a usage into one integer: 0x08070006 is LGUI plus
+  // the keyboard page plus C, i.e. Cmd+C. What they mean depends on the behavior,
+  // which is what `Behavior.parameter_sets` describes.
+  uint32 param1 = 2;
+  uint32 param2 = 3;
+}
+
+// --------------------------------------------------------------------------- //
+// the physical layout
+// --------------------------------------------------------------------------- //
+
+// Every layout this firmware offers, and which one is in use.
+//
+// All of them, not just the active one: which layout is active is itself part of
+// a keyboard's state, and a consumer that wants to switch needs to see the others.
+message PhysicalLayouts {
+  // Index into `layouts`. Key positions in a Keymap index into whichever layout
+  // this names, so pairing a keymap with the wrong layout silently mislabels every
+  // key.
+  uint32 active_index = 1;
+
+  repeated PhysicalLayout layouts = 2;
+}
+
+// Where the keys physically sit, as the firmware reports it from its shield
+// definition - so only as accurate as that definition.
+message PhysicalLayout {
+  string name = 1;
+
+  // Indexed by key position, like `Layer.bindings`.
+  repeated KeyPosition keys = 2;
+}
+
+// Geometry for one key, in hundredths of a key unit: width 100 is one 1u key.
+// Rotation is in hundredths of a degree about (rotation_x, rotation_y).
+//
+// Upstream spells these r, rx and ry. Spelled out here because a reader should not
+// have to know which of three one-letter fields is the angle.
+message KeyPosition {
+  int32 x = 1;
+  int32 y = 2;
+  int32 width = 3;
+  int32 height = 4;
+  int32 rotation = 5;
+  int32 rotation_x = 6;
+  int32 rotation_y = 7;
+}
+
+// --------------------------------------------------------------------------- //
+// the behavior table
+// --------------------------------------------------------------------------- //
+
+// One entry of the keyboard's behavior table.
+//
+// Keyboard-specific: ids are assigned per firmware build, and some behaviors exist
+// only because a particular keymap defines them. Bindings without this table are a
+// list of numbers.
+message Behavior {
+  int32 id = 1;
+
+  // What the keyboard calls it, e.g. "Mod-Tap". The protocol never reports the
+  // devicetree label a keymap is written with (`&mt`); translating between the two
+  // is a consumer's business, because it is a fact about how keymaps are written
+  // rather than about this keyboard.
+  string display_name = 2;
+
+  // How this behavior's parameters are to be interpreted.
+  //
+  // Upstream calls this field `metadata`, which says where it sits rather than
+  // what it is. Renamed here, and the rename is not cosmetic: a consumer was
+  // already converting between the two spellings by hand, in code whose own
+  // comment warned that the shapes "are NOT interchangeable and the difference is
+  // easy to miss".
+  repeated ParameterSet parameter_sets = 3;
+}
+
+// What a behavior accepts in its two parameter slots. A behavior may declare
+// several alternative sets; a binding satisfies one of them. Underglow is the
+// everyday example: its colour commands take a value where its on/off commands
+// take none.
+message ParameterSet {
+  repeated ParameterValue param1 = 1;
+  repeated ParameterValue param2 = 2;
+}
+
+// One admissible value for a parameter slot.
+//
+// The oneof is the keyboard saying what kind of thing the parameter is, which is
+// what lets a consumer decode a binding without hardcoding each behavior's
+// semantics. A behavior nobody has heard of decodes as well as Key Press.
+message ParameterValue {
+  // Human label, e.g. "Key", "Layer", "Clear All Profiles".
+  string name = 1;
+
+  oneof kind {
+    NoValue no_value = 2;
+    uint32 constant = 3;
+    ValueRange range = 4;
+    HidUsage hid_usage = 5;
+    LayerId layer_id = 6;
+  }
+}
+
+// Empty by design: these variants carry no payload, and a oneof needs a message
+// type to name the case. Presence of the variant is the whole meaning.
+message NoValue {}
+message LayerId {}
+
+message ValueRange {
+  int32 min = 1;
+  int32 max = 2;
+}
+
+// Upper bounds on the HID usages a slot accepts, per usage page.
+message HidUsage {
+  uint32 keyboard_max = 1;
+  uint32 consumer_max = 2;
+}
